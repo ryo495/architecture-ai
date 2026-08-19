@@ -201,10 +201,10 @@ export default function Home() {
   return (
     <main>
       <header className="site-header">
-        <a className="brand" href="#top" aria-label="建築AI ホーム">
-          <span className="brand-mark">A</span>
+        <a className="brand" href="#top" aria-label="建築法規くん ホーム">
+          <span className="brand-mark">法</span>
           <span>
-            <strong>建築AI</strong>
+            <strong>建築法規くん</strong>
             <small>法規・ボリュームチェック</small>
           </span>
         </a>
@@ -433,7 +433,7 @@ export default function Home() {
 
       <footer>
         <p>この結果は初期検討用です。確認申請上の最終判断は、最新法令・条例・行政協議・原図で再確認してください。</p>
-        <span>Ryo Otsuka Architects / Architecture AI PoC</span>
+        <span>Ryo Otsuka Architects / 建築法規くん PoC</span>
       </footer>
     </main>
   );
