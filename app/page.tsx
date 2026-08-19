@@ -1,6 +1,13 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   calculateVolume,
   type FloorInput,
@@ -30,6 +37,13 @@ const defaultInput: VolumeInput = {
   heightLimit: 10,
   floors: defaultFloors,
 };
+
+function cloneVolumeInput(value: VolumeInput): VolumeInput {
+  return {
+    ...value,
+    floors: value.floors.map((floor) => ({ ...floor })),
+  };
+}
 
 type NumericKey = Exclude<
   keyof VolumeInput,
@@ -132,14 +146,47 @@ function Gauge({
 }
 
 export default function Home() {
-  const [input, setInput] = useState<VolumeInput>(defaultInput);
+  const [input, setInput] = useState<VolumeInput>(() =>
+    cloneVolumeInput(defaultInput),
+  );
+  const [confirmedInput, setConfirmedInput] = useState<VolumeInput>(() =>
+    cloneVolumeInput(defaultInput),
+  );
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
   const [reviewedAt, setReviewedAt] = useState<string | null>(null);
-  const result = useMemo(() => calculateVolume(input), [input]);
+  const [hasPendingChanges, setHasPendingChanges] = useState(false);
+  const [calculationVersion, setCalculationVersion] = useState(0);
+  const resultColumnRef = useRef<HTMLElement>(null);
+  const result = useMemo(
+    () => calculateVolume(confirmedInput),
+    [confirmedInput],
+  );
+
+  useEffect(() => {
+    if (calculationVersion === 0 || typeof window === "undefined") return;
+    if (!window.matchMedia("(max-width: 1080px)").matches) return;
+
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    resultColumnRef.current?.scrollIntoView({
+      behavior: reducedMotion ? "auto" : "smooth",
+      block: "start",
+    });
+  }, [calculationVersion]);
+
+  const markPending = () => {
+    setHasPendingChanges(true);
+  };
 
   const updateNumber = (key: NumericKey, value: number) => {
     setInput((current) => ({ ...current, [key]: value }));
-    setReviewedAt(null);
+    markPending();
+  };
+
+  const updateText = (key: "projectName" | "address", value: string) => {
+    setInput((current) => ({ ...current, [key]: value }));
+    markPending();
   };
 
   const updateFloor = (id: string, area: number) => {
@@ -149,7 +196,7 @@ export default function Home() {
         floor.id === id ? { ...floor, area } : floor,
       ),
     }));
-    setReviewedAt(null);
+    markPending();
   };
 
   const handleFiles = (event: ChangeEvent<HTMLInputElement>) => {
@@ -169,6 +216,9 @@ export default function Home() {
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
+    setConfirmedInput(cloneVolumeInput(input));
+    setHasPendingChanges(false);
+    setCalculationVersion((current) => current + 1);
     setReviewedAt(
       new Intl.DateTimeFormat("ja-JP", {
         hour: "2-digit",
@@ -178,12 +228,13 @@ export default function Home() {
   };
 
   const reset = () => {
-    setInput({
-      ...defaultInput,
-      floors: defaultFloors.map((floor) => ({ ...floor })),
-    });
+    const resetInput = cloneVolumeInput(defaultInput);
+    setInput(resetInput);
+    setConfirmedInput(cloneVolumeInput(resetInput));
     setSelectedFiles([]);
     setReviewedAt(null);
+    setHasPendingChanges(false);
+    setCalculationVersion(0);
   };
 
   const statusCopy = {
@@ -194,7 +245,7 @@ export default function Home() {
   }[result.status];
 
   const maxFloorArea = Math.max(
-    ...input.floors.map((floor) => floor.area),
+    ...confirmedInput.floors.map((floor) => floor.area),
     1,
   );
 
@@ -238,10 +289,7 @@ export default function Home() {
                   type="text"
                   value={input.projectName}
                   onChange={(event) =>
-                    setInput((current) => ({
-                      ...current,
-                      projectName: event.target.value,
-                    }))
+                    updateText("projectName", event.target.value)
                   }
                 />
               </label>
@@ -251,10 +299,7 @@ export default function Home() {
                   type="text"
                   value={input.address}
                   onChange={(event) =>
-                    setInput((current) => ({
-                      ...current,
-                      address: event.target.value,
-                    }))
+                    updateText("address", event.target.value)
                   }
                 />
               </label>
@@ -341,20 +386,45 @@ export default function Home() {
           </section>
 
           <div className="form-actions">
-            <button className="primary-button" type="submit">概算結果を確定</button>
+            <button className="primary-button" type="submit">概算結果を更新</button>
             <button className="text-button" type="button" onClick={reset}>入力を初期化</button>
-            {reviewedAt ? <span aria-live="polite">{reviewedAt} に再確認</span> : null}
+            <span
+              className={hasPendingChanges ? "pending-change" : "result-current"}
+              aria-live="polite"
+            >
+              {hasPendingChanges
+                ? "未反映の変更あり"
+                : reviewedAt
+                  ? `${reviewedAt} に更新`
+                  : "初期値を表示中"}
+            </span>
           </div>
         </div>
 
-        <aside className="result-column" aria-live="polite">
-          <section className={`status-card ${result.status}`}>
+        <aside
+          ref={resultColumnRef}
+          className="result-column"
+          aria-live="polite"
+          aria-label="概算結果"
+        >
+          <div className={`result-sync-note ${hasPendingChanges ? "pending" : "current"}`}>
+            <strong>{hasPendingChanges ? "入力変更あり" : "計算結果は最新です"}</strong>
+            <span>
+              {hasPendingChanges
+                ? "右側は前回の結果です。「概算結果を更新」で再計算します。"
+                : reviewedAt
+                  ? `${reviewedAt} 時点の入力値で計算済み`
+                  : "初期入力値で計算済み"}
+            </span>
+          </div>
+
+          <section key={calculationVersion} className={`status-card ${result.status} result-updated`}>
             <div className="status-topline">
               <span>{statusCopy.eyebrow}</span>
               <i>概算 / 自動計算</i>
             </div>
             <h2>{statusCopy.title}</h2>
-            <p>{input.projectName || "名称未設定"}</p>
+            <p>{confirmedInput.projectName || "名称未設定"}</p>
           </section>
 
           <section className="result-panel">
@@ -366,9 +436,9 @@ export default function Home() {
               <span>敷地有効面積<br /><strong>{formatArea(result.effectiveSiteArea)}</strong></span>
             </div>
             <div className="gauges">
-              <Gauge label="建ぺい率" value={result.bcrUsage} used={formatArea(input.proposedBuildingArea)} limit={formatArea(result.maxBuildingArea)} />
+              <Gauge label="建ぺい率" value={result.bcrUsage} used={formatArea(confirmedInput.proposedBuildingArea)} limit={formatArea(result.maxBuildingArea)} />
               <Gauge label="容積率" value={result.farUsage} used={formatArea(result.farCountedArea)} limit={formatArea(result.maxFarArea)} />
-              <Gauge label="高さ" value={result.heightUsage} used={`${formatNumber(input.proposedHeight)} m`} limit={`${formatNumber(input.heightLimit)} m`} />
+              <Gauge label="高さ" value={result.heightUsage} used={`${formatNumber(confirmedInput.proposedHeight)} m`} limit={`${formatNumber(confirmedInput.heightLimit)} m`} />
             </div>
             <div className="allowance-grid">
               <Allowance label="建築面積余裕" value={formatArea(result.buildingAreaAllowance)} negative={result.buildingAreaAllowance < 0} />
@@ -387,7 +457,7 @@ export default function Home() {
             </div>
             <div className="massing-scene" aria-label="各階床面積を比率で表した概念図">
               <div className="massing-stack">
-                {[...input.floors].reverse().map((floor) => {
+                {[...confirmedInput.floors].reverse().map((floor) => {
                   if (floor.area <= 0) return null;
                   const width = 44 + (floor.area / maxFloorArea) * 46;
                   return (
@@ -399,7 +469,7 @@ export default function Home() {
                 })}
               </div>
               <div className="site-slab"><span>有効敷地 {formatArea(result.effectiveSiteArea)}</span></div>
-              <div className="road-strip"><span>前面道路 {formatNumber(input.roadWidth)} m</span></div>
+              <div className="road-strip"><span>前面道路 {formatNumber(confirmedInput.roadWidth)} m</span></div>
             </div>
             <p className="caption">斜線・天空率・方位・隣地高低差を反映した法規形状ではありません。</p>
           </section>
